@@ -9,6 +9,7 @@ import SignIn from './pages/SignIn';
 import ForgotPassword from './pages/ForgotPassword';
 import Navbar from './components/Navbar';
 import PrivateRoute from './components/PrivateRoute';
+import Category from './pages/Category';
 
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
         <Routes>
           <Route path='/' element={<Explore></Explore>}></Route>
           <Route path='/offers' element={<Offers></Offers>}></Route>
+          <Route path='/category/:categoryName' element={<Category></Category>}></Route>
           <Route path='/profile' element={<PrivateRoute></PrivateRoute>}>
             <Route path='/profile' element={<Profile></Profile>}></Route>
           </Route>
