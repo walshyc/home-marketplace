@@ -1,12 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import {
+  getStorage,
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+} from 'firebase/storage';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase.config';
 import { useNavigate } from 'react-router-dom';
 import Spinner from '../components/Spinner';
 import { toast } from 'react-toastify';
+import { v4 as uuidv4 } from 'uuid';
 
 const CreateListing = () => {
   const [loading, setLoading] = useState(false);
-  const [geoLocationEnabled, setGeoLocationEnabled] = useState(false);
+  const [geoLocationEnabled, setGeoLocationEnabled] = useState(true);
   const [formData, setFormData] = useState({
     type: 'rent',
     name: '',
@@ -84,7 +93,8 @@ const CreateListing = () => {
   const onSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    if (discountedPrice >= regularPrice) {
+    console.log(discountedPrice);
+    if (+discountedPrice >= +regularPrice) {
       setLoading(false);
       toast.error('Discounted price must be less than regular price');
       return;
@@ -95,7 +105,7 @@ const CreateListing = () => {
       toast.error('You can only upload max 6 images');
       return;
     }
-    let geoLocation = {};
+    let geolocation = {};
     let location;
 
     if (geoLocationEnabled) {
@@ -104,9 +114,10 @@ const CreateListing = () => {
       );
 
       const data = await response.json();
+      console.log(data);
 
-      geoLocation.lat = data.results[0]?.geometry.location.lat ?? 0;
-      geoLocation.lng = data.results[0]?.geometry.location.lng ?? 0;
+      geolocation.lat = data.results[0]?.geometry.location.lat ?? 0;
+      geolocation.lng = data.results[0]?.geometry.location.lng ?? 0;
 
       location =
         data.status === 'ZERO_RESULTS'
@@ -119,13 +130,77 @@ const CreateListing = () => {
         return;
       }
     } else {
-      geoLocation.lat = latitude;
-      geoLocation.lng = longitude;
+      geolocation.lat = latitude;
+      geolocation.lng = longitude;
       location = address;
-      console.log(geoLocation, location);
+      console.log(geolocation, location);
     }
+    // function to store images in firebase
+    const storeImage = async (image) => {
+      return new Promise((resolve, reject) => {
+        const storage = getStorage();
+        const fileName = `${auth.currentUser.uid}-${image.name}-${uuidv4()}`;
 
+        const storageRef = ref(storage, 'images/' + fileName);
+
+        const uploadTask = uploadBytesResumable(storageRef, image);
+
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            // Observe state change events such as progress, pause, and resume
+            // Get task progress, including the number of bytes uploaded and the total number of bytes to be uploaded
+            const progress =
+              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log('Upload is ' + progress + '% done');
+            switch (snapshot.state) {
+              case 'paused':
+                console.log('Upload is paused');
+                break;
+              case 'running':
+                console.log('Upload is running');
+                break;
+            }
+          },
+          (error) => {
+            reject(error);
+          },
+          () => {
+            // Handle successful uploads on complete
+            // For instance, get the download URL: https://firebasestorage.googleapis.com/...
+            getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+              resolve(downloadURL);
+            });
+          }
+        );
+      });
+    };
+
+    const imageUrls = await Promise.all(
+      [...images].map((image) => storeImage(image))
+    ).catch((err) => {
+      setLoading(false);
+      console.log(err);
+      toast.error('Error uploading images');
+      return;
+    });
+
+    const formDataCopy = {
+      ...formData,
+      imgUrls: imageUrls,
+      geolocation,
+      timestamp: serverTimestamp(),
+    };
+
+    delete formDataCopy.images;
+    delete formDataCopy.address;
+    location && (formDataCopy.location = location);
+    !formDataCopy.offer && delete formDataCopy.discountedPrice;
+
+    const docRef = await addDoc(collection(db, 'listings'), formDataCopy);
     setLoading(false);
+    toast.success('Listing created successfully');
+    navigate(`/category/${formDataCopy.type}/${docRef.id}`);
   };
 
   if (loading) {
@@ -320,14 +395,14 @@ const CreateListing = () => {
           </label>
           <div className="formPriceDiv">
             <input
+              className="formInputSmall"
               type="number"
+              id="regularPrice"
               value={regularPrice}
               onChange={onMutate}
               min="50"
               max="750000000"
               required
-              id="regularPrice"
-              className="formInputSmall"
             />
             {type === 'rent' && <p className="formPriceText">€ / month</p>}
           </div>
@@ -338,14 +413,14 @@ const CreateListing = () => {
               </label>
               <div className="formPriceDiv">
                 <input
+                  className="formInputSmall"
                   type="number"
+                  id="discountedPrice"
                   value={discountedPrice}
                   onChange={onMutate}
                   min="50"
                   max="750000000"
-                  required
-                  id="discountedPrice"
-                  className="formInputSmall"
+                  required={offer}
                 />
               </div>
             </>
